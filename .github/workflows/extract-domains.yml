@@ -1,99 +1,110 @@
-name: Extract Domains
+name: Update Reject List
 
 on:
+  workflow_dispatch:  # 手动触发工作流
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 0 点运行一次
   push:
     branches:
       - main
     paths:
-      - '.github/workflows/**'  # 仅在工作流文件更改时触发
-  workflow_dispatch:  # 手动触发工作流
+      - '.github/workflows/**'  # 只对 workflow 文件的修改触发
 
 jobs:
-  extract_domains:
+  extract-domains:
     runs-on: ubuntu-latest
-
     steps:
-    # 1. Checkout 仓库代码
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    # 2. 设置 Python 环境
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
+      # Step 2: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
 
-    # 3. 安装依赖
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
-    # 4. 创建并运行 Python 脚本
-    - name: Run domain extraction script
-      run: |
-        echo "
-        import requests
-        import json
+      # Step 4: Create and run Python script to extract and process domains
+      - name: Run Python script to extract and process domains
+        run: |
+          # 创建 Python 脚本内容
+          echo '
+          import requests
+          import json
 
-        # Recursive function to extract domains
-        def extract_domains(data):
-            domains = []
-            if isinstance(data, dict):
-                if 'domain' in data:
-                    domains.extend(data['domain'])
-                if 'domain_suffix' in data:
-                    domains.extend(data['domain_suffix'])
-                if 'domain_keyword' in data:
-                    domains.extend(data['domain_keyword'])
-            elif isinstance(data, list):
-                for item in data:
-                    domains.extend(extract_domains(item))
-            return domains
+          # Recursive function to extract domains from JSON data
+          def extract_domains(data):
+              domains = []
+              if isinstance(data, dict):
+                  if "domain" in data:
+                      domains.extend(data["domain"])
+                  if "domain_suffix" in data:
+                      domains.extend(data["domain_suffix"])
+                  if "domain_keyword" in data:
+                      domains.extend(data["domain_keyword"])
+              elif isinstance(data, list):
+                  for item in data:
+                      domains.extend(extract_domains(item))
+              return domains
 
-        # JSON 文件链接列表
-        urls = [
-            'https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject.json',
-            'https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject_extra.json',
-            'https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject_phishing.json'
-            # 你可以在这里添加更多的下载链接
-        ]
+          # JSON 文件链接列表
+          urls = [
+              "https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject.json",
+              "https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject_extra.json",
+              "https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject_phishing.json"
+          ]
 
-        all_domains = []
+          all_domains = []
 
-        for url in urls:
-            response = requests.get(url)
-            if response.status_code != 200:
-                print(f'Failed to fetch the JSON file from {url}')
-                continue
-            data = response.json()
-            if 'rules' in data:
-                for rule in data['rules']:
-                    domains = extract_domains(rule)
-                    all_domains.extend(domains)
+          # 遍历每个 URL，获取 JSON 数据并提取域名
+          for url in urls:
+              response = requests.get(url)
+              if response.status_code != 200:
+                  print(f"Failed to fetch the JSON file from {url}")
+                  continue
 
-        # 去重并保留唯一域名
-        all_domains = list(set(all_domains))
+              data = response.json()
 
-        # 删除空行并写入到文本文件
-        output_file_path = 'domains.txt'
+              # 提取 'rules' 部分中的所有域名
+              if "rules" in data:
+                  for rule in data["rules"]:
+                      domains = extract_domains(rule)
+                      all_domains.extend(domains)
 
-        with open(output_file_path, 'w') as output_file:
-            for domain in all_domains:
-                if domain.strip():  # 删除空行
-                    output_file.write(domain + '\\n')
+          # 去重并清理域名
+          all_domains = list(set([domain.strip() for domain in all_domains if domain.strip()]))
 
-        print(f'Domain extraction complete. Check "{output_file_path}".')
-        " > extract_domains.py
+          # 将域名保存到文件
+          output_file_path = "domains.txt"
+          with open(output_file_path, "w") as output_file:
+              for domain in all_domains:
+                  output_file.write(domain + "\n")
 
-        # 运行 Python 脚本
-        python3 extract_domains.py
+          print(f"Domain extraction complete. Check \"{output_file_path}\".")
+          ' > extract_domains.py
 
-    # 5. 提交并推送生成的域名列表
-    - name: Commit and push domain list
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add domains.txt
-        git commit -m "Update domain list"
-        git push
+          # 运行 Python 脚本
+          python3 extract_domains.py
+
+      # Step 5: Commit and push extracted domains
+      - name: Commit and push extracted domains
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 检查是否有修改并推送
+          if git status --short | grep -q "domains.txt"; then
+            git add domains.txt
+            git commit -m "Update domains.txt with extracted domains"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
