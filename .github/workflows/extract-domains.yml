@@ -1,0 +1,99 @@
+name: Extract Domains
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'  # 仅在工作流文件更改时触发
+  workflow_dispatch:  # 手动触发工作流
+
+jobs:
+  extract_domains:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout 仓库代码
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # 2. 设置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    # 3. 安装依赖
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    # 4. 创建并运行 Python 脚本
+    - name: Run domain extraction script
+      run: |
+        echo "
+        import requests
+        import json
+
+        # Recursive function to extract domains
+        def extract_domains(data):
+            domains = []
+            if isinstance(data, dict):
+                if 'domain' in data:
+                    domains.extend(data['domain'])
+                if 'domain_suffix' in data:
+                    domains.extend(data['domain_suffix'])
+                if 'domain_keyword' in data:
+                    domains.extend(data['domain_keyword'])
+            elif isinstance(data, list):
+                for item in data:
+                    domains.extend(extract_domains(item))
+            return domains
+
+        # JSON 文件链接列表
+        urls = [
+            'https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject.json',
+            'https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject_extra.json',
+            'https://raw.githubusercontent.com/jackszb/sing-box-ruleset/main/domainset/reject_phishing.json'
+            # 你可以在这里添加更多的下载链接
+        ]
+
+        all_domains = []
+
+        for url in urls:
+            response = requests.get(url)
+            if response.status_code != 200:
+                print(f'Failed to fetch the JSON file from {url}')
+                continue
+            data = response.json()
+            if 'rules' in data:
+                for rule in data['rules']:
+                    domains = extract_domains(rule)
+                    all_domains.extend(domains)
+
+        # 去重并保留唯一域名
+        all_domains = list(set(all_domains))
+
+        # 删除空行并写入到文本文件
+        output_file_path = 'domains.txt'
+
+        with open(output_file_path, 'w') as output_file:
+            for domain in all_domains:
+                if domain.strip():  # 删除空行
+                    output_file.write(domain + '\\n')
+
+        print(f'Domain extraction complete. Check "{output_file_path}".')
+        " > extract_domains.py
+
+        # 运行 Python 脚本
+        python3 extract_domains.py
+
+    # 5. 提交并推送生成的域名列表
+    - name: Commit and push domain list
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add domains.txt
+        git commit -m "Update domain list"
+        git push
